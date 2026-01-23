@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ST4 PLAYER PRO</title>
+    
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <meta name="theme-color" content="#050505">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/icon-192.png') }}">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=OFFLINE_READY">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+</head>
+<body>
+
+<div class="bg-layer"></div>
+
+<div class="player-card">
+    
+    <div class="header">
+        <span class="brand" onclick="toggleTheme()">ST4 PLAYER</span>
+        
+        <button class="btn-ctl tiny" onclick="toggleQuickMenu()" id="btn-main-menu" style="z-index: 102;">
+            <i class="fa-solid fa-bars"></i>
+        </button>
+
+        <div id="quick-menu" class="quick-menu-panel">
+            <div class="menu-grid">
+                <button class="btn-ctl tiny" id="btn-xf" onclick="toggleCrossfeed()" style="position: relative;">
+                    <i class="fa-solid fa-globe"></i>
+                    <span id="xf-indicator" class="dot-indicator" style="background:#ff00ff; display:none;"></span>
+                </button>
+                
+                <button class="btn-ctl tiny" id="btn-bp" onclick="toggleBitPerfect()" style="position: relative;">
+                    <i class="fa-solid fa-microchip"></i>
+                    <span id="bp-indicator" class="dot-indicator" style="background:#00ff00; display:none;"></span>
+                </button>
+                
+                <button class="btn-ctl tiny" id="btn-timer" onclick="tg('tm'); toggleQuickMenu()" style="position: relative;">
+                    <i class="fa-solid fa-stopwatch"></i>
+                    <span id="timer-badge" class="badge-indicator" style="display:none;"></span>
+                </button>
+                
+                <button class="btn-ctl tiny" onclick="toggleLyrics(); toggleQuickMenu()" id="btn-lyrics">
+                    <i class="fa-solid fa-microphone-lines"></i>
+                </button>
+                
+                <button class="btn-ctl tiny" onclick="tg('pm'); toggleQuickMenu()">
+                    <i class="fa-solid fa-list-ul"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-row">
+        <div class="disk-container">
+            <div class="disc-wrapper" id="discArea">
+                <img id="cover-img" src="/static/img/default.png" alt="Cover" class="album-label spinning" onerror="this.src='/static/img/default.png'">
+            </div>
+        </div>
+        <div class="info-container">
+            <div class="marquee-wrapper"><h2 id="tit">Ready</h2></div>
+            <h3 id="art">ST4 Audio Engine</h3>
+            <p id="alb" class="meta-album" style="display:none;">Album Name</p>
+            <div class="meta-row" id="meta-row">
+                <span id="cat-badge" class="badge" style="display:none;">UNK</span>
+                <span id="genre" class="badge" style="display:none;">Genre</span>
+                <span id="year" class="badge" style="display:none;">Year</span>
+            </div>
+            <div id="tech-specs" class="meta-tech">WAITING SIGNAL...</div>
+        </div>
+    </div>
+
+    <div class="time-box">
+        <span class="time-txt" id="t-cur">0:00</span>
+        <input type="range" id="pb" min="0" max="100" value="0">
+        <span class="time-txt" id="t-tot">0:00</span>
+    </div>
+
+    <div class="console-deck">
+        <div class="deck-section eq-section">
+            <div class="deck-label">
+                <span>EQUALIZER</span>
+                <button onclick="tg('pr-om')" class="preset-link">
+                    <span id="cur-preset-txt">PRESETS</span>
+                    <i class="fa-solid fa-chevron-down"></i>
+                </button>
+            </div>
+            <div class="eq-grid">
+                <div class="knob-wrap"><div class="knob-common small" id="k-f1" data-type="f1"></div><label>Sub</label><span class="eq-val" id="v-f1">0</span></div>
+                <div class="knob-wrap"><div class="knob-common small" id="k-f2" data-type="f2"></div><label>Low</label><span class="eq-val" id="v-f2">0</span></div>
+                <div class="knob-wrap"><div class="knob-common small" id="k-f3" data-type="f3"></div><label>Kick</label><span class="eq-val" id="v-f3">0</span></div>
+                <div class="knob-wrap"><div class="knob-common small" id="k-f4" data-type="f4"></div><label>Mid</label><span class="eq-val" id="v-f4">0</span></div>
+                <div class="knob-wrap"><div class="knob-common small" id="k-f5" data-type="f5"></div><label>Body</label><span class="eq-val" id="v-f5">0</span></div>
+                <div class="knob-wrap"><div class="knob-common small" id="k-f6" data-type="f6"></div><label>Vox</label><span class="eq-val" id="v-f6">0</span></div>
+                <div class="knob-wrap"><div class="knob-common small" id="k-f7" data-type="f7"></div><label>Detl</label><span class="eq-val" id="v-f7">0</span></div>
+                <div class="knob-wrap"><div class="knob-common small" id="k-f8" data-type="f8"></div><label>Pres</label><span class="eq-val" id="v-f8">0</span></div>
+                <div class="knob-wrap"><div class="knob-common small" id="k-f9" data-type="f9"></div><label>Treb</label><span class="eq-val" id="v-f9">0</span></div>
+                <div class="knob-wrap"><div class="knob-common small" id="k-f10" data-type="f10"></div><label>Air</label><span class="eq-val" id="v-f10">0</span></div>
+            </div>
+        </div>
+        <div class="deck-separator"></div>
+        <div class="deck-section vol-section">
+            <div class="deck-label" style="justify-content:center;">MASTER</div>
+            <div class="vol-wrapper" style="display:flex; flex-direction:column; align-items:center;">
+                <div class="knob-common large" id="k-vol" data-type="vol"></div>
+                <span id="v-vol-val">50%</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="balance-container">
+        <div class="bal-header">
+            <span>Left</span>
+            <span id="bal-label" style="color:var(--primary);">CENTER</span>
+            <span>Right</span>
+        </div>
+        <div class="bal-controls">
+            <button onclick="toggleMuteSide('L')" id="btn-mute-l" class="btn-mute-side">MUTE L</button>
+            <input type="range" id="balanceSlider" min="-100" max="100" value="0" step="5" oninput="updateBalance(this.value)" ondblclick="resetBalance()">
+            <button onclick="toggleMuteSide('R')" id="btn-mute-r" class="btn-mute-side">MUTE R</button>
+        </div>
+    </div>
+
+    <div class="main-controls">
+        <button class="btn-ctl small" id="btn-shuf" onclick="ctl('shuffle')"><i class="fa-solid fa-shuffle"></i></button>
+        <button class="btn-ctl" onclick="ctl('prev')"><i class="fa-solid fa-backward-step"></i></button>
+        <button class="btn-ctl" onclick="ctl('stop')"><i class="fa-solid fa-stop"></i></button>
+        <button class="btn-play" id="btn-play-pause" onclick="ctl('pause')"><i class="fa-solid fa-play" id="pi"></i></button>
+        <button class="btn-ctl" onclick="ctl('next')"><i class="fa-solid fa-forward-step"></i></button>
+        <button class="btn-ctl small" id="btn-loop" onclick="ctl('loop')"><i class="fa-solid fa-repeat"></i></button>
+    </div>
+
+    <div class="search-container">
+        <form onsubmit="searchYt(event)" class="url-form">
+            <input id="searchInput" class="search-input" placeholder="Search Song / Artist / URL..." autocomplete="off">
+            <button type="submit" class="btn-add"><i class="fa-solid fa-magnifying-glass"></i></button>
+        </form>
+    </div>
+</div>
+
+<div id="pm" class="overlay">
+    <div class="overlay-header">
+        <h2>Media Center</h2>
+        <button onclick="tg('pm')" class="close-btn">&times;</button>
+    </div>
+    <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('lib')" id="tab-lib">FILES</button>
+        <button class="tab-btn" onclick="switchTab('pl')" id="tab-pl">SAVED</button>
+        <button class="tab-btn" onclick="switchTab('queue')" id="tab-queue">QUEUE</button>
+    </div>
+    <div id="content-lib" class="tab-content" style="display:flex;">
+        <div class="manager-toolbar" style="flex-direction: column; gap: 5px;">
+            <div style="display:flex; gap:5px; width:100%; align-items:center;">
+                <button onclick="scanLibrary()" class="btn-refresh" style="width:auto; padding:0 12px; background:var(--primary); color:#000; font-weight:bold;">
+                    <i class="fa-solid fa-sync"></i> RESCAN
+                </button>
+                <div id="scan-status" style="flex:1; font-size:0.75rem; color:#888; white-space:nowrap; overflow:hidden;">
+                    Ready to Scan
+                </div>
+                <select id="sort-select" onchange="loadLibraryDB(this.value)" style="background:#222; color:#fff; border:1px solid #333; padding:5px; border-radius:6px; font-size:0.8rem; outline:none;">
+                    <option value="title">A-Z Title</option>
+                    <option value="artist">By Artist</option>
+                    <option value="album">By Album</option>
+                    <option value="newest">Newest</option>
+                </select>
+            </div>
+            
+            <div class="path-display" style="padding: 0 8px;">
+                <i class="fa-solid fa-search"></i>
+                <input id="lib-search" placeholder="Filter Library..." oninput="filterLibraryLocal(this.value)">
+            </div>
+        </div>
+
+        <div id="lib-list" class="playlist-scroll"></div>
+    </div>
+
+    <div id="content-pl" class="tab-content" style="display:none;">
+        <div class="playlist-form">
+            <input id="pl-name" class="search-input" placeholder="Name">
+            <input id="pl-url" class="search-input" placeholder="URL">
+            <button onclick="addPl()" class="btn-add"><i class="fa-solid fa-plus"></i></button>
+        </div>
+        <div id="pl-list" class="playlist-scroll"></div>
+    </div>
+    <div id="content-queue" class="tab-content" style="display:none;">
+        <div class="manager-toolbar">
+            <span style="color:#aaa; font-size:0.8rem;">PLAYING NEXT</span>
+            <button onclick="clearQueue()" class="btn-shortcut" style="background:#444; margin-left:auto;">Clear All</button>
+        </div>
+        <div id="queue-list" class="playlist-scroll"></div>
+    </div>
+</div>
+
+<div id="tm" class="output-overlay-compact">
+    <div class="output-box">
+        <div class="output-header-small">
+            <span>Sleep Timer</span>
+            <button onclick="tg('tm')" class="close-icon">&times;</button>
+        </div>
+        <div class="output-options">
+            <button class="btn-out-compact" onclick="setTimer(15)">
+                <i class="fa-regular fa-clock"></i>
+                <div class="out-text"><strong>15 Min</strong><small>Sleep soon</small></div>
+            </button>
+            <button class="btn-out-compact" onclick="setTimer(30)">
+                <i class="fa-solid fa-clock"></i>
+                <div class="out-text"><strong>30 Min</strong><small>Standard</small></div>
+            </button>
+            <button class="btn-out-compact" onclick="setTimer(60)">
+                <i class="fa-solid fa-hourglass-half"></i>
+                <div class="out-text"><strong>1 Hour</strong><small>Long play</small></div>
+            </button>
+            <button class="btn-out-compact" onclick="setTimer(0)" style="border:1px solid #ff4444;">
+                <i class="fa-solid fa-ban" style="color:#ff4444;"></i>
+                <div class="out-text"><strong>Disable</strong><small>Turn off timer</small></div>
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="pr-om" class="output-overlay-compact">
+    <div class="output-box">
+        <div class="output-header-small">
+            <span>Equalizer Presets</span>
+            <button onclick="tg('pr-om')" class="close-icon">&times;</button>
+        </div>
+        <div id="preset-container" class="preset-grid-compact"></div>
+    </div>
+</div>
+
+<div id="lym" class="overlay lyrics-overlay">
+    <div class="overlay-header" style="border-bottom:none;">
+        <div style="display:flex; align-items:center; gap:10px;">
+            <h2 style="font-size:0.9rem; color:#ccc;">LYRICS</h2>
+            <button onclick="fetchLyrics()" style="background:none; border:none; color:var(--primary); cursor:pointer;">
+                <i class="fa-solid fa-rotate-right"></i>
+            </button>
+        </div>
+        <button onclick="toggleLyrics()" class="close-btn">&times;</button>
+    </div>
+    <div id="lyrics-container" class="lyrics-scroll">
+        <div id="lyric-placeholder" style="margin-top:50px; color:#888;">Fetching...</div>
+    </div>
+</div>
+
+<div id="search-popup" class="search-overlay">
+    <div class="search-modal">
+        <div class="modal-header">
+            <h3>Search Results</h3>
+            <button onclick="closeSearch()" class="close-btn">&times;</button>
+        </div>
+        <div id="popup-content" class="modal-body"></div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/script.js') }}?v=FINAL_V12"></script>
+<script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register("{{ url_for('static', filename='sw.js') }}")
+                .then(reg => console.log('SW Registered!', reg.scope))
+                .catch(err => console.log('SW Fail:', err));
+        });
+    }
+</script>
+</body>
+</html>

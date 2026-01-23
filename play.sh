@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Setup Path Socket (Termux Friendly)
+TMP_DIR="/data/data/com.termux/files/usr/tmp"
+mkdir -p "$TMP_DIR"
+SOCKET="$TMP_DIR/mpv_socket"
+LOG_FILE="$TMP_DIR/mpv_error.log"
+
+INPUT_LINK="$1"
+
+# Cleanup Previous Session
+pkill -9 -f "mpv" > /dev/null 2>&1 || true
+rm -f "$SOCKET"
+sleep 0.2
+
+# Termux Wakelock (Prevent Sleep)
+if command -v termux-wake-lock &> /dev/null; then
+    termux-wake-lock
+fi
+
+# Start MPV
+mpv "$INPUT_LINK" \
+    --input-ipc-server="$SOCKET" \
+    --no-video \
+    --force-window=no \
+    --no-terminal \
+    --volume=100 \
+    --keep-open=yes \
+    --idle=yes \
+    --msg-level=all=error \
+    --cache=yes \
+    --demuxer-max-bytes=10M \
+    > "$LOG_FILE" 2>&1
