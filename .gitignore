@@ -1,6 +1,0 @@
-__pycache__/
-*.pyc
-music.db
-state_bp_mode
-*.bak
-.env
