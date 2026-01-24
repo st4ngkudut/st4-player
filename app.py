@@ -11,41 +11,32 @@ import random
 import requests
 from threading import Lock
 from ytmusicapi import YTMusic
-# Pastikan library.py sudah ada dan benar
 from library import lib_mgr 
 
 app = Flask(__name__)
 
-# ==========================================
-# KONFIGURASI PATH (TERMUX FRIENDLY)
-# ==========================================
+# --- CONFIG ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 IS_ANDROID = "ANDROID_ROOT" in os.environ or os.path.exists("/system/bin/app_process")
 
-# Socket MPV (Penting untuk komunikasi)
 if IS_ANDROID:
     MPV_SOCKET = "/data/data/com.termux/files/usr/tmp/mpv_socket"
 else:
     MPV_SOCKET = "/tmp/mpv_socket"
 
-# File System
 PLAYLIST_FILE = os.path.join(BASE_DIR, "playlist.json")
 COVER_DIR = os.path.join(BASE_DIR, "static", "covers")
 PLAY_SCRIPT = os.path.join(BASE_DIR, "play.sh")
 DEFAULT_PATH_FILE = os.path.join(BASE_DIR, "default_path.txt")
 BP_MODE_FILE = os.path.join(BASE_DIR, "state_bp_mode")
 
-# Format Audio
 AUDIO_EXTS = ('.mp3', '.flac', '.wav', '.m4a', '.ogg', '.opus', '.wma', '.aac')
 
-# Globals
 state_lock = Lock()
 yt_music = YTMusic()
 needs_restore = False
 
-# ==========================================
-# STATE GLOBAL (STATUS PLAYER)
-# ==========================================
+# --- GLOBAL STATE ---
 st4_state = {
     "title": "Ready", 
     "artist": "Waiting...", 
@@ -64,21 +55,18 @@ st4_state = {
     "sleep_target": 0,
     "current_eq_cmd": "",
     "last_play_time": 0,
-    "error_count": 0
+    "error_count": 0,
+    "manual_stop": False
 }
 
-# State Filter Audio (DSP)
 af_state = {
-    "eq": "",        # FireEqualizer
-    "balance": "",   # Pan Filter
-    "crossfeed": ""  # BS2B Filter
+    "eq": "", 
+    "balance": "",
+    "crossfeed": "" 
 }
 
-# ==========================================
-# FUNGSI FILTER & DSP
-# ==========================================
+# --- HELPERS & DSP ---
 def is_bp_active():
-    """Cek status Bit Perfect"""
     if os.path.exists(BP_MODE_FILE):
         try:
             with open(BP_MODE_FILE, 'r') as f: return f.read().strip() == "1"
@@ -86,15 +74,12 @@ def is_bp_active():
     return False
 
 def update_mpv_filters():
-    """Update filter audio di MPV"""
-    # Jika Bit Perfect aktif, matikan semua filter
     if is_bp_active():
         mpv_send(["set_property", "af", ""]) 
         mpv_send(["set_property", "volume", 100])
         with state_lock: st4_state["volume"] = 100
         return
 
-    # Jika Normal, gabungkan filter
     filters = []
     if af_state["balance"]: filters.append(af_state["balance"])
     if af_state["eq"]: filters.append(af_state["eq"])
@@ -122,12 +107,7 @@ EQ_PRESETS = {
     "KZEDCPro": {"f1":6,"f2":5,"f3":3,"f4":1,"f5":0,"f6":0,"f7":-1,"f8":-1,"f9":0,"f10":0}
 }
 
-# ==========================================
-# FUNGSI HELPER
-# ==========================================
-
 def mpv_send(cmd):
-    """Kirim perintah JSON ke socket MPV"""
     if not os.path.exists(MPV_SOCKET): return None
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -152,12 +132,9 @@ def extract_local_cover(filepath):
         save_path = os.path.join(COVER_DIR, cover_filename)
         if os.path.exists(save_path): return f"/static/covers/{cover_filename}"
         
-        # Jangan ekstrak jika file terlalu kecil (bukan lagu)
         if os.path.getsize(filepath) < 102400: return ""
-        
         cmd = ["ffmpeg", "-i", filepath, "-an", "-vcodec", "mjpeg", "-q:v", "2", "-frames:v", "1", "-y", save_path]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        
         if os.path.exists(save_path): return f"/static/covers/{cover_filename}"
     except: pass
     return ""
@@ -165,14 +142,13 @@ def extract_local_cover(filepath):
 def trigger_play(url):
     global needs_restore
     if os.path.exists(PLAY_SCRIPT):
-        # Beri izin execute
         os.chmod(PLAY_SCRIPT, 0o755)
-        
         with state_lock: 
             st4_state["last_play_time"] = time.time()
             if "http" in url: st4_state["thumb"] = get_yt_thumb(url)
             else: st4_state["thumb"] = ""
             st4_state["status"] = "loading"
+            st4_state["manual_stop"] = False 
         
         needs_restore = True
         subprocess.Popen(["/bin/bash", PLAY_SCRIPT, url])
@@ -180,13 +156,10 @@ def trigger_play(url):
 def play_next_in_queue():
     with state_lock:
         if not st4_state["queue"]: return
-        
         time_diff = time.time() - st4_state.get("last_play_time", 0)
-        # Proteksi loop error (jika lagu skip terlalu cepat)
-        if time_diff < 2.0:
-            st4_state["error_count"] += 1
-        else:
-            st4_state["error_count"] = 0
+        
+        if time_diff < 2.0: st4_state["error_count"] += 1
+        else: st4_state["error_count"] = 0
             
         if st4_state["error_count"] > 5:
             st4_state["status"] = "stopped"
@@ -205,23 +178,19 @@ def find_key_insensitive(data, search_keys):
     if not data or not isinstance(data, dict): return ""
     for k in search_keys:
         for data_k, data_v in data.items():
-            if data_k.lower() == k.lower():
-                return data_v
+            if data_k.lower() == k.lower(): return data_v
     return ""
 
-# ==========================================
-# WORKER UTAMA (METADATA & AUTO PLAY)
-# ==========================================
+# --- WORKER ---
 def metadata_worker():
     global st4_state, needs_restore
     last_path = ""
     idle_counter = 0
-    
     if not os.path.exists(COVER_DIR): os.makedirs(COVER_DIR, exist_ok=True)
     
     while True:
         try:
-            # 1. Sleep Timer Logic
+            # Sleep Timer
             with state_lock:
                 target = st4_state["sleep_target"]
                 if target > 0 and time.time() >= target:
@@ -230,17 +199,15 @@ def metadata_worker():
                     st4_state["current_index"] = -1
                     threading.Thread(target=mpv_send, args=(["stop"],)).start()
             
-            # 2. Cek Koneksi MPV
+            # Cek MPV
             mpv_ready = False
             try:
-                if mpv_send(["get_property", "idle-active"]) is not None:
-                    mpv_ready = True
+                if mpv_send(["get_property", "idle-active"]) is not None: mpv_ready = True
             except: pass
 
             if mpv_ready:
                 idle_counter = 0 
-                
-                # Restore Settings (Vol & EQ) saat ganti lagu
+                # Restore Settings
                 path = mpv_send(["get_property", "path"])
                 if path and (path != last_path or needs_restore):
                     last_path = path
@@ -250,16 +217,19 @@ def metadata_worker():
                     mpv_send(["set_property", "volume", saved_vol])
                     update_mpv_filters()
 
-                # Logic Auto Play Next
+                # Logic Auto Play Next (STOPPED BY EMPTY QUEUE NOW)
                 is_eof = mpv_send(["get_property", "eof-reached"])
                 is_idle = mpv_send(["get_property", "idle-active"])
                 
-                if is_eof is True or (is_idle is True and st4_state["status"] == "playing"):
+                if st4_state.get("manual_stop", False):
+                    if is_idle:
+                        with state_lock: st4_state["manual_stop"] = False
+                elif is_eof is True or (is_idle is True and st4_state["status"] == "playing"):
                     play_next_in_queue()
                     time.sleep(1)
                     continue
 
-                # Ambil Metadata Thumbnail
+                # Metadata
                 final_thumb = ""
                 with state_lock:
                     if st4_state["queue"] and st4_state["current_index"] < len(st4_state["queue"]):
@@ -273,7 +243,6 @@ def metadata_worker():
                         if loc: final_thumb = loc
                 with state_lock: st4_state["thumb"] = final_thumb
 
-                # Ambil Metadata Audio Tags
                 meta_all = mpv_send(["get_property", "metadata"]) or {}
                 mpv_title = mpv_send(["get_property", "media-title"])
                 
@@ -292,7 +261,7 @@ def metadata_worker():
                 temp_genre = find_key_insensitive(meta_all, ["genre"])
                 temp_year = find_key_insensitive(meta_all, ["date", "year", "original_date"])
 
-                # --- TECH SPECS (CODEC INFO) ---
+                # Tech Specs
                 tech_display = []
                 raw_codec = mpv_send(["get_property", "audio-codec-name"])
                 raw_fmt = mpv_send(["get_property", "audio-params/format"])
@@ -302,11 +271,9 @@ def metadata_worker():
                 codec_str = raw_codec.upper() if raw_codec else "UNK"
                 tech_display.append(codec_str)
 
-                # Bitrate
                 if raw_br and int(raw_br) > 0:
                     tech_display.append(f"{int(int(raw_br)/1000)}kbps")
                 
-                # Sample Rate
                 sample_rate_val = 0
                 if raw_rate:
                     try:
@@ -314,7 +281,6 @@ def metadata_worker():
                         tech_display.append(f"{sample_rate_val/1000:g}kHz")
                     except: pass
 
-                # Bit Depth
                 bit_depth = ""
                 if raw_fmt:
                     if 's16' in raw_fmt: bit_depth = "16bit"
@@ -324,14 +290,11 @@ def metadata_worker():
                 
                 lossy_list = ['MP3', 'AAC', 'VORBIS', 'OPUS', 'WEBM', 'M4A']
                 is_lossy = any(x in codec_str for x in lossy_list)
-                if not is_lossy and bit_depth:
-                    tech_display.append(bit_depth)
+                if not is_lossy and bit_depth: tech_display.append(bit_depth)
 
-                # Badge
                 badge = "Lossless"
                 if is_lossy: badge = "Lossy"
-                elif (bit_depth in ["24bit", "32bit"]) or (sample_rate_val > 48000):
-                    badge = "Hi-Res"
+                elif (bit_depth in ["24bit", "32bit"]) or (sample_rate_val > 48000): badge = "Hi-Res"
                 
                 tech_display.append(badge)
                 temp_info = " • ".join(tech_display)
@@ -363,10 +326,7 @@ def metadata_worker():
         
 threading.Thread(target=metadata_worker, daemon=True).start()
 
-# ==========================================
-# FLASK ROUTES
-# ==========================================
-
+# --- ROUTES ---
 @app.route('/')
 def index(): return render_template('index.html')
 
@@ -374,7 +334,6 @@ def index(): return render_template('index.html')
 def status():
     with state_lock:
         resp = st4_state.copy()
-        # Format Timer Display
         target = resp.get("sleep_target", 0)
         if target > 0:
             remaining = int(target - time.time())
@@ -389,7 +348,6 @@ def status():
             resp["timer_active"] = False
         return jsonify(resp)
 
-# --- ROUTES PLAYBACK CONTROL ---
 @app.route('/play', methods=['GET', 'POST'])
 def play():
     url = request.args.get('url') or request.form.get('link')
@@ -400,7 +358,6 @@ def play():
     
     with state_lock:
         if mode == 'play_now':
-            # Jika play folder/file lokal
             if os.path.exists(url) and os.path.isfile(url):
                 try:
                     folder_path = os.path.dirname(url)
@@ -417,7 +374,6 @@ def play():
                 except:
                     st4_state["queue"] = [song_obj]; st4_state["current_index"] = 0
             
-            # Jika play YouTube
             elif "youtube.com" in url or "youtu.be" in url:
                 st4_state["queue"] = [song_obj]; st4_state["current_index"] = 0
                 try:
@@ -452,7 +408,11 @@ def control(action):
     if action == "pause": mpv_send(["cycle", "pause"])
     elif action == "stop":
         mpv_send(["stop"])
-        with state_lock: st4_state["status"] = "stopped"
+        with state_lock: 
+            st4_state["status"] = "stopped"
+            st4_state["queue"] = []       # <--- [FIX] Kosongkan Playlist
+            st4_state["current_index"] = -1 # <--- [FIX] Reset Index
+            st4_state["manual_stop"] = True 
     elif action == "next": play_next_in_queue()
     elif action == "prev":
         with state_lock:
@@ -495,7 +455,6 @@ def jump_to_index():
     except: pass
     return jsonify({"error": "invalid index"})
 
-# --- EQ & SOUND CONTROL ---
 def generate_fireq_cmd(gains_dict):
     freqs = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
     entries = []
@@ -586,7 +545,6 @@ def set_balance():
     update_mpv_filters()
     return jsonify({"status": "ok", "L": l_vol, "R": r_vol})
 
-# --- SYSTEM UTILS ---
 @app.route('/system/default_path', methods=['GET', 'POST'])
 def handle_default_path():
     if request.method == 'POST':
@@ -612,7 +570,6 @@ def set_timer():
     with state_lock: st4_state["sleep_target"] = (time.time() + minutes*60) if minutes > 0 else 0
     return jsonify({"status": "ok", "timer": minutes})
 
-# --- QUEUE & PLAYLIST ---
 @app.route('/queue/list')
 def get_queue():
     with state_lock: return jsonify({"queue": st4_state["queue"], "current_index": st4_state["current_index"]})
@@ -637,7 +594,6 @@ def save_playlist():
         return jsonify({"status": "ok"})
     except: return jsonify({"error": "failed"}), 500
 
-# --- LIBRARY & FILES ---
 @app.route('/get_files')
 def get_files():
     target = request.args.get('path', '/')
@@ -712,7 +668,6 @@ def get_lyrics():
     if not artist or not title or artist == "Unknown Artist":
         return jsonify({"error": "No track info"})
 
-    # Bersihkan nama agar pencarian lebih akurat
     clean_title = re.sub(r"\(.*?\)|\[.*?\]", "", title).strip()
     
     try:
