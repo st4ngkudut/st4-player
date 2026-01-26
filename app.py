@@ -12,6 +12,7 @@ import requests
 from threading import Lock
 from ytmusicapi import YTMusic
 from library import lib_mgr 
+import yt_dlp
 
 app = Flask(__name__)
 
@@ -64,6 +65,8 @@ af_state = {
     "balance": "",
     "crossfeed": "" 
 }
+
+download_status = {} 
 
 # --- HELPERS & DSP ---
 def is_bp_active():
@@ -181,6 +184,43 @@ def find_key_insensitive(data, search_keys):
             if data_k.lower() == k.lower(): return data_v
     return ""
 
+# --- DOWNLOAD LOGIC ---
+def run_download(video_id, save_path, quality_mode='mp3'):
+    url = f"https://music.youtube.com/watch?v={video_id}"
+    download_status[video_id] = "downloading"
+    
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': os.path.join(save_path, '%(artist)s - %(title)s.%(ext)s'),
+        'writethumbnail': True,
+        'noplaylist': True,
+        'quiet': True,
+        'no_warnings': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }, {'key': 'EmbedThumbnail'}, {'key': 'FFmpegMetadata'}]
+    }
+
+    if quality_mode == 'high':
+        ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio'
+        ydl_opts['postprocessors'] = [{'key': 'EmbedThumbnail'}, {'key': 'FFmpegMetadata'}]
+        
+    elif quality_mode == 'low':
+        ydl_opts['postprocessors'][0]['preferredquality'] = '64'
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        download_status[video_id] = "success"
+    except Exception as e:
+        print(f"DL Error: {e}")
+        download_status[video_id] = "failed"
+    
+    time.sleep(5)
+    if video_id in download_status: del download_status[video_id]
+
 # --- WORKER ---
 def metadata_worker():
     global st4_state, needs_restore
@@ -217,7 +257,7 @@ def metadata_worker():
                     mpv_send(["set_property", "volume", saved_vol])
                     update_mpv_filters()
 
-                # Logic Auto Play Next (STOPPED BY EMPTY QUEUE NOW)
+                # Logic Auto Play
                 is_eof = mpv_send(["get_property", "eof-reached"])
                 is_idle = mpv_send(["get_property", "idle-active"])
                 
@@ -410,8 +450,8 @@ def control(action):
         mpv_send(["stop"])
         with state_lock: 
             st4_state["status"] = "stopped"
-            st4_state["queue"] = []       # <--- [FIX] Kosongkan Playlist
-            st4_state["current_index"] = -1 # <--- [FIX] Reset Index
+            st4_state["queue"] = []       
+            st4_state["current_index"] = -1 
             st4_state["manual_stop"] = True 
     elif action == "next": play_next_in_queue()
     elif action == "prev":
@@ -455,24 +495,42 @@ def jump_to_index():
     except: pass
     return jsonify({"error": "invalid index"})
 
-def generate_fireq_cmd(gains_dict):
-    freqs = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
-    entries = []
-    for i in range(1, 11):
-        try: val = float(gains_dict.get(f'f{i}', 0))
-        except: val = 0.0
-        entries.append(f"entry({freqs[i-1]},{val})")
+# --- DOWNLOAD ROUTES ---
+@app.route('/download_song')
+def download_song():
+    vid = request.args.get('id')
+    quality = request.args.get('q', 'mp3')
+    if not vid: return jsonify({"error": "No ID"})
     
-    entry_str = ";".join(entries)
-    return f"firequalizer=gain_entry='{entry_str}'"
+    save_path = "/storage/emulated/0/Music"
+    if os.path.exists(DEFAULT_PATH_FILE):
+        try:
+            with open(DEFAULT_PATH_FILE, 'r') as f: 
+                tmp = f.read().strip()
+                if os.path.exists(tmp): save_path = tmp
+        except: pass
+        
+    threading.Thread(target=run_download, args=(vid, save_path, quality)).start()
+    return jsonify({"status": "started", "path": save_path, "quality": quality})
+
+@app.route('/check_dl')
+def check_dl():
+    vid = request.args.get('id')
+    return jsonify({"status": download_status.get(vid, "none")})
 
 @app.route('/control/eq')
 def set_eq():
     p = request.args
     gains = {}
+    for i in range(1, 11): gains[f'f{i}'] = p.get(f'f{i}', 0)
+    
+    freqs = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+    entries = []
     for i in range(1, 11):
-        gains[f'f{i}'] = p.get(f'f{i}', 0)
-    cmd_str = generate_fireq_cmd(gains)
+        val = float(gains.get(f'f{i}', 0))
+        entries.append(f"entry({freqs[i-1]},{val})")
+    cmd_str = f"firequalizer=gain_entry='{';'.join(entries)}'"
+    
     af_state["eq"] = f"lavfi=[{cmd_str}]"
     update_mpv_filters()
     with state_lock: st4_state["current_eq_cmd"] = af_state["eq"]
@@ -483,7 +541,13 @@ def set_preset():
     n = request.args.get('name')
     if n in EQ_PRESETS:
         preset = EQ_PRESETS[n]
-        cmd_str = generate_fireq_cmd(preset)
+        freqs = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+        entries = []
+        for i in range(1, 11):
+            val = float(preset.get(f'f{i}', 0))
+            entries.append(f"entry({freqs[i-1]},{val})")
+        cmd_str = f"firequalizer=gain_entry='{';'.join(entries)}'"
+        
         af_state["eq"] = f"lavfi=[{cmd_str}]"
         update_mpv_filters()
         with state_lock: 
@@ -496,24 +560,24 @@ def set_preset():
 def toggle_bitperfect():
     current = "0"
     if os.path.exists(BP_MODE_FILE):
-        with open(BP_MODE_FILE, 'r') as f: current = f.read().strip()
-    
+        try:
+            with open(BP_MODE_FILE, 'r') as f: current = f.read().strip()
+        except: pass
     new_state = "1" if current == "0" else "0"
     with open(BP_MODE_FILE, 'w') as f: f.write(new_state)
-    
     update_mpv_filters()
-    
     if new_state == "0":
         mpv_send(["set_property", "volume", 50])
         with state_lock: st4_state["volume"] = 50
-
     return jsonify({"status": "ok", "bitperfect": new_state == "1"})
 
 @app.route('/get_bitperfect')
 def get_bitperfect():
     active = False
     if os.path.exists(BP_MODE_FILE):
-        with open(BP_MODE_FILE, 'r') as f: active = f.read().strip() == "1"
+        try:
+            with open(BP_MODE_FILE, 'r') as f: active = f.read().strip() == "1"
+        except: pass
     return jsonify({"active": active})
 
 @app.route('/control/crossfeed')
@@ -532,16 +596,10 @@ def set_balance():
     try:
         l_vol = float(request.args.get('l', 1.0))
         r_vol = float(request.args.get('r', 1.0))
-    except:
-        l_vol = 1.0; r_vol = 1.0
-
+    except: l_vol = 1.0; r_vol = 1.0
     pan_cmd = f"pan=stereo|c0={l_vol:.2f}*c0|c1={r_vol:.2f}*c1"
-    
-    if l_vol >= 0.99 and r_vol >= 0.99:
-        af_state["balance"] = ""
-    else:
-        af_state["balance"] = f"lavfi=[{pan_cmd}]"
-    
+    if l_vol >= 0.99 and r_vol >= 0.99: af_state["balance"] = ""
+    else: af_state["balance"] = f"lavfi=[{pan_cmd}]"
     update_mpv_filters()
     return jsonify({"status": "ok", "L": l_vol, "R": r_vol})
 
@@ -558,7 +616,7 @@ def handle_default_path():
     else:
         path = "/root/music"
         if os.path.exists(DEFAULT_PATH_FILE):
-            try:
+            try: 
                 with open(DEFAULT_PATH_FILE, 'r') as f: path = f.read().strip()
             except: pass
         return jsonify({"path": path})
@@ -582,7 +640,7 @@ def clear_queue():
 @app.route('/get_playlist')
 def get_playlist():
     if os.path.exists(PLAYLIST_FILE):
-        try:
+        try: 
             with open(PLAYLIST_FILE, 'r') as f: return jsonify(json.load(f))
         except: pass
     return jsonify([])
@@ -617,31 +675,24 @@ def get_files():
 def scan_library():
     scan_path = "/storage/emulated/0/"
     if os.path.exists(DEFAULT_PATH_FILE):
-        try:
+        try: 
             with open(DEFAULT_PATH_FILE, 'r') as f: scan_path = f.read().strip()
         except: pass
-    
     lib_mgr.scan_directory(scan_path)
     return jsonify({"status": "started", "path": scan_path})
 
 @app.route('/library/status')
-def library_status():
-    return jsonify(lib_mgr.get_scan_status())
+def library_status(): return jsonify(lib_mgr.get_scan_status())
 
 @app.route('/library/tracks')
 def library_tracks():
     sort_mode = request.args.get('sort', 'title')
     tracks = lib_mgr.get_all_tracks(sort_mode)
-    
     formatted = []
     for t in tracks:
         formatted.append({
-            'name': t['title'], 
-            'path': t['path'], 
-            'type': 'file',
-            'artist': t['artist'],
-            'album': t['album'],
-            'meta': f"{t['artist']} - {t['album']}"
+            'name': t['title'], 'path': t['path'], 'type': 'file',
+            'artist': t['artist'], 'album': t['album'], 'meta': f"{t['artist']} - {t['album']}"
         })
     return jsonify(formatted)
 
@@ -664,44 +715,28 @@ def get_lyrics():
     with state_lock:
         artist = st4_state.get("artist", "")
         title = st4_state.get("title", "")
-    
-    if not artist or not title or artist == "Unknown Artist":
-        return jsonify({"error": "No track info"})
-
+    if not artist or not title or artist == "Unknown Artist": return jsonify({"error": "No track info"})
     clean_title = re.sub(r"\(.*?\)|\[.*?\]", "", title).strip()
-    
     try:
         url = "https://lrclib.net/api/get"
         params = { "artist_name": artist, "track_name": clean_title }
         resp = requests.get(url, params=params, timeout=5)
         data = resp.json()
-        
-        if 'syncedLyrics' in data and data['syncedLyrics']:
-            return jsonify({"type": "synced", "lyrics": data['syncedLyrics']})
-        elif 'plainLyrics' in data and data['plainLyrics']:
-            return jsonify({"type": "plain", "lyrics": data['plainLyrics']})
-        else:
-            return jsonify({"error": "Not found"})
-    except Exception as e:
-        return jsonify({"error": str(e)})
+        if 'syncedLyrics' in data and data['syncedLyrics']: return jsonify({"type": "synced", "lyrics": data['syncedLyrics']})
+        elif 'plainLyrics' in data and data['plainLyrics']: return jsonify({"type": "plain", "lyrics": data['plainLyrics']})
+        else: return jsonify({"error": "Not found"})
+    except Exception as e: return jsonify({"error": str(e)})
 
 def get_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(('8.8.8.8', 80))
         IP = s.getsockname()[0]
-    except Exception:
-        IP = '127.0.0.1'
-    finally:
-        s.close()
+    except: IP = '127.0.0.1'
+    finally: s.close()
     return IP
 
 if __name__ == '__main__':
     local_ip = get_ip()
-    print("\n" + "="*40)
-    print(f"  ST4 PLAYER IS RUNNING! 🚀")
-    print(f"  Access from this device: http://127.0.0.1:5000")
-    print(f"  Access from PC/Laptop:   http://{local_ip}:5000")
-    print("="*40 + "\n")
-    
+    print("\n" + "="*40 + f"\n  ST4 PLAYER IS RUNNING! 🚀\n  Access: http://{local_ip}:5000\n" + "="*40 + "\n")
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
