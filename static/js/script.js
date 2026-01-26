@@ -1,5 +1,5 @@
 // =========================================
-// ST4 PLAYER - CORE LOGIC (FINAL)
+// ST4 PLAYER - CORE LOGIC (FINAL ULTIMATE)
 // =========================================
 
 let currentScanPath = ''; 
@@ -154,6 +154,7 @@ function ctl(action) {
                 setTextSafe('t-cur', "0:00");
                 const pb = document.getElementById('pb');
                 if(pb) pb.value = 0;
+                loadQueue(); // Refresh queue UI to show empty
             } else if(action === 'shuffle') {
                 showToast("Queue Shuffled");
                 loadQueue();
@@ -724,6 +725,10 @@ function switchTab(t) {
 
 function handlePathKey(e) { if(e.key === 'Enter') browsePath(); }
 
+// =====================
+// SEARCH & DOWNLOAD
+// =====================
+
 function searchYt(e) {
     e.preventDefault();
     const q = document.getElementById('searchInput').value;
@@ -754,14 +759,78 @@ function searchYt(e) {
             
             info.appendChild(t);
             info.appendChild(a);
+
+            // DOWNLOAD UI AREA
+            const dlContainer = document.createElement('div');
+            dlContainer.style.cssText = "display:flex; gap:5px; margin-left:auto; align-items:center;";
+            
+            // Main DL Button
+            const dlBtn = document.createElement('button');
+            dlBtn.className = 'btn-ctl tiny';
+            dlBtn.style.background = 'rgba(255,255,255,0.1)';
+            dlBtn.innerHTML = '<i class="fa-solid fa-download"></i>';
+            dlBtn.onclick = (e) => {
+                e.stopPropagation();
+                showDownloadOptions(v.videoId, dlContainer);
+            };
+
+            dlContainer.appendChild(dlBtn);
+
             row.appendChild(img);
             row.appendChild(info);
+            row.appendChild(dlContainer);
             
+            // Play on Row Click
             row.onclick = () => { playSong(v.link, 'play_now', v.title); tg('search-popup'); };
             content.appendChild(row);
         });
     });
 }
+
+function showDownloadOptions(vid, container) {
+    container.innerHTML = ''; // Clear icon
+
+    // Helper to create options
+    const mkBtn = (txt, q, color) => {
+        const b = document.createElement('button');
+        b.className = 'btn-ctl tiny';
+        b.style.cssText = `font-size:9px; padding:2px 6px; background:${color}; margin-right:2px;`;
+        b.innerText = txt;
+        b.onclick = (e) => {
+            e.stopPropagation();
+            startDownload(vid, container, q);
+        };
+        return b;
+    };
+
+    container.appendChild(mkBtn('HQ', 'high', 'rgba(0,255,100,0.2)')); // Green
+    container.appendChild(mkBtn('MP3', 'mp3', 'rgba(0,100,255,0.2)')); // Blue
+    container.appendChild(mkBtn('LOW', 'low', 'rgba(255,100,0,0.2)')); // Orange
+}
+
+function startDownload(vid, container, quality) {
+    container.innerHTML = '<button class="btn-ctl tiny" disabled style="background:transparent"><i class="fa-solid fa-spinner fa-spin"></i></button>';
+    showToast(`Downloading (${quality.toUpperCase()})...`);
+
+    fetch('/download_song?id=' + vid + '&q=' + quality)
+        .then(r => r.json())
+        .then(() => {
+            const poller = setInterval(() => {
+                fetch('/check_dl?id=' + vid).then(r=>r.json()).then(d => {
+                    if (d.status === 'success') {
+                        clearInterval(poller);
+                        container.innerHTML = '<i class="fa-solid fa-check" style="color:#0f0; margin-right:10px;"></i>';
+                        showToast("Download Finished!");
+                    } else if (d.status === 'failed') {
+                        clearInterval(poller);
+                        container.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="color:red; margin-right:10px;"></i>';
+                        showToast("Download Failed");
+                    }
+                });
+            }, 1000);
+        });
+}
+
 function closeSearch() { tg('search-popup'); }
 
 async function addPl() {
