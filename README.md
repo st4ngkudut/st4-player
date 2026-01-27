@@ -36,7 +36,7 @@ Jalankan perintah ini di terminal Termux:
 
 ```bash
 pkg update && pkg upgrade -y
-pkg install python3 ffmpeg mpv git yt-dlp -y
+pkg install python3 python3-pip ffmpeg mpv git yt-dlp -y
 ```
 
 ### 2. Clone Repository
